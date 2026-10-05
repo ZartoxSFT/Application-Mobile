@@ -1,20 +1,21 @@
 package com.example.gameapp.bluetooth
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
-import android.bluetooth.BluetoothSocket
+import android.bluetooth.BluetoothGatt
+import android.bluetooth.BluetoothGattCallback
+import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothProfile
+import android.bluetooth.BluetoothStatusCodes
+import android.os.Build
 import android.util.Log
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
+import androidx.annotation.RequiresPermission
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.withContext
-import java.io.IOException
-import java.io.OutputStream
 import java.util.UUID
-import kotlin.time.Duration.Companion.milliseconds
 
 class BluetoothController(private val bluetoothAdapter: BluetoothAdapter?) {
 
@@ -36,183 +37,120 @@ class BluetoothController(private val bluetoothAdapter: BluetoothAdapter?) {
     private val _isScanning = MutableStateFlow(false)
     val isScanning: StateFlow<Boolean> = _isScanning.asStateFlow()
 
-    private var socket: BluetoothSocket? = null
-    private var outputStream: OutputStream? = null
+    private var bluetoothGatt: BluetoothGatt? = null
+    private var writeCharacteristic: BluetoothGattCharacteristic? = null
 
-    // Standard SPP (Serial Port Profile) UUID for Bluetooth Serial (ESP32)
-    private val sppUuid: UUID = UUID.fromString("00001101-0000-0000-0000-00805F9B34FB")
+    // UUIDs standard "Nordic UART" pour la communication série BLE (très utilisé sur ESP32)
+    private val UART_SERVICE_UUID: UUID = UUID.fromString("6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
+    private val UART_RX_CHARACTERISTIC_UUID: UUID = UUID.fromString("6E400002-B5A3-F393-E0A9-E50E24DCCA9E") // Pour écrire vers l'ESP32
 
-    /**
-     * Start discovery for nearby Bluetooth devices.
-     */
     @SuppressLint("MissingPermission")
     fun startDiscovery(): Boolean {
         if (bluetoothAdapter == null) return false
-        if (bluetoothAdapter.isDiscovering) {
-            bluetoothAdapter.cancelDiscovery()
-        }
+        if (bluetoothAdapter.isDiscovering) bluetoothAdapter.cancelDiscovery()
         _scannedDevices.value = emptyList()
-        val started = bluetoothAdapter.startDiscovery()
+        val started = bluetoothAdapter.startDiscovery() // Note : startDiscovery trouve le BLE et le Classique
         _isScanning.value = started
-        Log.d("BluetoothController", "Start discovery: $started")
         return started
     }
 
-    /**
-     * Stop active Bluetooth device discovery.
-     */
     @SuppressLint("MissingPermission")
     fun stopDiscovery() {
-        if (bluetoothAdapter?.isDiscovering == true) {
-            bluetoothAdapter.cancelDiscovery()
-        }
+        bluetoothAdapter?.cancelDiscovery()
         _isScanning.value = false
     }
 
-    fun onDiscoveryFinished() {
-        _isScanning.value = false
-        Log.d("BluetoothController", "Discovery finished")
-    }
-
-    /**
-     * Add a newly discovered device to the scanned devices list.
-     */
     @SuppressLint("MissingPermission")
     fun addScannedDevice(device: BluetoothDevice) {
         val currentList = _scannedDevices.value
         if (currentList.none { it.address == device.address }) {
             _scannedDevices.value = currentList + device
-            Log.d("BluetoothController", "Discovered device: ${device.name ?: device.address}")
         }
     }
 
-    /**
-     * Get a list of paired/bonded Bluetooth devices.
-     */
     @SuppressLint("MissingPermission")
-    fun getPairedDevices(): List<BluetoothDevice> {
-        return bluetoothAdapter?.bondedDevices?.toList() ?: emptyList()
+    fun connectToDevice(device: BluetoothDevice) {
+        _isConnecting.value = true
+        val deviceName = device.name ?: device.address
+        _connectionStatus.value = "Connecting to $deviceName..."
+
+        stopDiscovery()
+
+        // Connexion au serveur GATT (BLE)
+        bluetoothGatt = device.connectGatt(null, false, gattCallback)
     }
 
-    /**
-     * Connect to a specific Bluetooth device (e.g. ESP-32-S3 Feather).
-     */
-    @SuppressLint("MissingPermission")
-    suspend fun connectToDevice(device: BluetoothDevice): Boolean {
-        return withContext(Dispatchers.IO) {
-            _isConnecting.value = true
-            val deviceName = device.name ?: device.address
-            _connectionStatus.value = "Connecting to $deviceName..."
+    // Le callback qui gère les événements BLE (Asynchrone)
+    private val gattCallback = object : BluetoothGattCallback() {
+        @SuppressLint("MissingPermission")
+        override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
+            if (newState == BluetoothProfile.STATE_CONNECTED) {
+                _connectionStatus.value = "Connected. Discovering services..."
+                // Une fois connecté, on doit demander à l'ESP32 quels services il propose
+                gatt.discoverServices()
+            } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                closeConnection()
+            }
+        }
 
-            try {
-                // Always cancel discovery prior to connecting; discovery degrades socket performance and causes timeouts
-                bluetoothAdapter?.cancelDiscovery()
-                delay(500.milliseconds)
+        @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+        override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                val service = gatt.getService(UART_SERVICE_UUID)
+                if (service != null) {
+                    writeCharacteristic = service.getCharacteristic(UART_RX_CHARACTERISTIC_UUID)
 
-                // Fetch SDP UUIDs if null to help populate the Bluetooth stack SDP cache
-                if (device.uuids == null) {
-                    device.fetchUuidsWithSdp()
-                    delay(200.milliseconds)
-                }
-
-                var connected = false
-                var lastException: Exception? = null
-
-                // Strategy 1: Insecure RFCOMM socket via SDP UUID (standard for SPP / ESP32)
-                try {
-                    Log.d(
-                        "BluetoothController",
-                        "Attempting connection via createInsecureRfcommSocketToServiceRecord..."
-                    )
-                    socket = device.createInsecureRfcommSocketToServiceRecord(sppUuid)
-                    socket?.connect()
-                    connected = true
-                } catch (e: IOException) {
-                    Log.w(
-                        "BluetoothController",
-                        "Insecure RFCOMM connection via SDP failed",
-                        e
-                    )
-                    lastException = e
-                    closeSocketSilently()
-                    delay(500.milliseconds)
-                }
-
-                if (connected && socket != null) {
-                    outputStream = socket?.outputStream
                     _isConnected.value = true
                     _isConnecting.value = false
-                    _connectedDeviceName.value = deviceName
-                    _connectionStatus.value = "Connected to $deviceName"
-                    Log.d("BluetoothController", "Successfully connected to $deviceName")
-                    true
+                    _connectedDeviceName.value = gatt.device.name ?: gatt.device.address
+                    _connectionStatus.value = "Connected and Ready"
+                    Log.d("BluetoothController", "UART Service trouvé. Prêt à envoyer des données.")
                 } else {
-                    throw lastException
-                        ?: IOException("Failed to establish Bluetooth socket connection")
+                    _connectionStatus.value = "UART Service introuvable sur cet appareil"
+                    disconnect()
                 }
-            } catch (e: Exception) {
-                Log.e("BluetoothController", "Connection failed", e)
-                closeConnection()
-                _connectionStatus.value = "Connection failed: ${e.localizedMessage}"
-                false
+            } else {
+                _connectionStatus.value = "Échec de la découverte des services"
+                disconnect()
             }
         }
     }
 
-    /**
-     * Send a text message or command to the connected ESP32 device.
-     */
-    suspend fun sendMessage(message: String): Boolean {
-        return withContext(Dispatchers.IO) {
-            if ((outputStream == null) || (!_isConnected.value)) {
-                Log.e("BluetoothController", "Cannot send message: Not connected")
-                return@withContext false
-            }
+    @SuppressLint("MissingPermission")
+    fun sendMessage(message: String): Boolean {
+        val gatt = bluetoothGatt
+        val char = writeCharacteristic
 
-            try {
-                outputStream?.write(message.toByteArray())
-                outputStream?.flush()
-                Log.d("BluetoothController", "Sent message: $message")
-                true
-            } catch (e: IOException) {
-                Log.e("BluetoothController", "Error sending message", e)
-                _connectionStatus.value = "Failed to send message"
-                false
-            }
+        if (gatt == null || char == null || !_isConnected.value) {
+            Log.e("BluetoothController", "Non connecté")
+            return false
+        }
+
+        char.value = message.toByteArray()
+
+        // La méthode d'écriture dépend de la version d'Android
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val result = gatt.writeCharacteristic(char, message.toByteArray(), BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+            result == BluetoothStatusCodes.SUCCESS
+        } else {
+            @Suppress("DEPRECATION")
+            gatt.writeCharacteristic(char)
         }
     }
 
-    /**
-     * Disconnect from the Bluetooth device.
-     */
+    @SuppressLint("MissingPermission")
     fun disconnect() {
-        closeConnection()
+        bluetoothGatt?.disconnect()
     }
 
-    private fun closeSocketSilently() {
-        try {
-            socket?.close()
-        } catch (e: IOException) {
-            Log.w("BluetoothController", "Error closing temporary socket", e)
-        } finally {
-            socket = null
-        }
-    }
-
+    @SuppressLint("MissingPermission")
     private fun closeConnection() {
-        try {
-            outputStream?.close()
-            socket?.close()
-        } catch (e: IOException) {
-            Log.e("BluetoothController", "Error closing socket", e)
-        } finally {
-            outputStream = null
-            socket = null
-            _isConnected.value = false
-            _isConnecting.value = false
-            _connectedDeviceName.value = null
-            _connectionStatus.value = "Disconnected"
-        }
+        bluetoothGatt?.close()
+        bluetoothGatt = null
+        writeCharacteristic = null
+        _isConnected.value = false
+        _isConnecting.value = false
+        _connectedDeviceName.value = null
+        _connectionStatus.value = "Disconnected"
     }
 }
-

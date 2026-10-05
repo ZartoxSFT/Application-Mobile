@@ -44,7 +44,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,19 +52,17 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.content.ContextCompat.getSystemService
 import com.example.gameapp.bluetooth.BluetoothController
-import kotlinx.coroutines.launch
 
 @SuppressLint("MissingPermission")
 @Composable
 fun HomeScreen() {
     val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
 
     val bluetoothManager: BluetoothManager? =
         getSystemService(context, BluetoothManager::class.java)
     val bluetoothAdapter: BluetoothAdapter? = bluetoothManager?.adapter
 
-    // Controller handling connection & messaging with ESP32
+    // Controller handling connection & messaging with ESP32 (BLE)
     val bluetoothController = remember(bluetoothAdapter) {
         BluetoothController(bluetoothAdapter)
     }
@@ -134,7 +131,9 @@ fun HomeScreen() {
                     }
 
                     BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> {
-                        bluetoothController.onDiscoveryFinished()
+                        // Le callback onDiscoveryFinished n'est plus appelé explicitement car
+                        // l'état isScanning est mis à jour dans stopDiscovery() et startDiscovery()
+                        bluetoothController.stopDiscovery()
                     }
                 }
             }
@@ -177,7 +176,7 @@ fun HomeScreen() {
                 val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
                 enableBluetoothLauncher.launch(enableBtIntent)
             } else {
-                pairedDevices = bluetoothController.getPairedDevices()
+                pairedDevices = bluetoothAdapter?.bondedDevices?.toList() ?: emptyList()
                 showDevicePicker = true
                 bluetoothController.startDiscovery()
             }
@@ -206,7 +205,7 @@ fun HomeScreen() {
         } else if (bluetoothAdapter?.isEnabled == false) {
             requestEnableBluetooth()
         } else {
-            pairedDevices = bluetoothController.getPairedDevices()
+            pairedDevices = bluetoothAdapter?.bondedDevices?.toList() ?: emptyList()
             showDevicePicker = true
             bluetoothController.startDiscovery()
         }
@@ -276,12 +275,10 @@ fun HomeScreen() {
 
                     Button(
                         onClick = {
-                            coroutineScope.launch {
-                                val success = bluetoothController.sendMessage(messageText)
-                                val toastMsg =
-                                    if (success) "Message sent!" else "Failed to send message"
-                                Toast.makeText(context, toastMsg, Toast.LENGTH_SHORT).show()
-                            }
+                            val success = bluetoothController.sendMessage(messageText)
+                            val toastMsg =
+                                if (success) "Message sent!" else "Failed to send message"
+                            Toast.makeText(context, toastMsg, Toast.LENGTH_SHORT).show()
                         }
                     ) {
                         Text("Send Message")
@@ -368,9 +365,7 @@ fun HomeScreen() {
                             DeviceItem(device = device) {
                                 bluetoothController.stopDiscovery()
                                 showDevicePicker = false
-                                coroutineScope.launch {
-                                    bluetoothController.connectToDevice(device)
-                                }
+                                bluetoothController.connectToDevice(device) // Plus de coroutine
                             }
                         }
                     }
@@ -404,9 +399,7 @@ fun HomeScreen() {
                                 DeviceItem(device = device) {
                                     bluetoothController.stopDiscovery()
                                     showDevicePicker = false
-                                    coroutineScope.launch {
-                                        bluetoothController.connectToDevice(device)
-                                    }
+                                    bluetoothController.connectToDevice(device) // Plus de coroutine
                                 }
                             }
                         }
