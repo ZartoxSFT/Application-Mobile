@@ -65,4 +65,5 @@ dependencies {
     implementation(libs.koin.compose.viewmodel)
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.analytics)
+    implementation(libs.firebase.auth)
 }

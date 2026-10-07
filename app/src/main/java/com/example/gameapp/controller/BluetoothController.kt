@@ -1,4 +1,4 @@
-package com.example.gameapp.bluetooth
+package com.example.gameapp.controller
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -18,7 +18,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.util.UUID
 
 class BluetoothController(private val bluetoothAdapter: BluetoothAdapter?) {
-
     private val _isConnecting = MutableStateFlow(false)
     val isConnecting: StateFlow<Boolean> = _isConnecting.asStateFlow()
 
@@ -42,14 +41,16 @@ class BluetoothController(private val bluetoothAdapter: BluetoothAdapter?) {
 
     // UUIDs standard "Nordic UART" pour la communication série BLE (très utilisé sur ESP32)
     private val UART_SERVICE_UUID: UUID = UUID.fromString("6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
-    private val UART_RX_CHARACTERISTIC_UUID: UUID = UUID.fromString("6E400002-B5A3-F393-E0A9-E50E24DCCA9E") // Pour écrire vers l'ESP32
+    private val UART_RX_CHARACTERISTIC_UUID: UUID =
+        UUID.fromString("6E400002-B5A3-F393-E0A9-E50E24DCCA9E") // Pour écrire vers l'ESP32
 
     @SuppressLint("MissingPermission")
     fun startDiscovery(): Boolean {
         if (bluetoothAdapter == null) return false
         if (bluetoothAdapter.isDiscovering) bluetoothAdapter.cancelDiscovery()
         _scannedDevices.value = emptyList()
-        val started = bluetoothAdapter.startDiscovery() // Note : startDiscovery trouve le BLE et le Classique
+        val started =
+            bluetoothAdapter.startDiscovery() // Note : startDiscovery trouve le BLE et le Classique
         _isScanning.value = started
         return started
     }
@@ -130,7 +131,11 @@ class BluetoothController(private val bluetoothAdapter: BluetoothAdapter?) {
 
         // La méthode d'écriture dépend de la version d'Android
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val result = gatt.writeCharacteristic(char, message.toByteArray(), BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+            val result = gatt.writeCharacteristic(
+                char,
+                message.toByteArray(),
+                BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            )
             result == BluetoothStatusCodes.SUCCESS
         } else {
             @Suppress("DEPRECATION")
