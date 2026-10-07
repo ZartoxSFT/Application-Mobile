@@ -11,4 +11,8 @@ class HomeViewModel(
         val currentUser = firebaseAuth.currentUser
         return currentUser != null
     }
+
+    fun logout() {
+        firebaseAuth.signOut()
+    }
 }

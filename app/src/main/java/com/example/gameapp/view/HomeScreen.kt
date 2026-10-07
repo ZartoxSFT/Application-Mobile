@@ -39,6 +39,11 @@ fun HomeScreen(
                 }) {
                     Text("Historic")
                 }
+                Button(onClick = {
+                    homeVM.logout()
+                }) {
+                    Text("Logout")
+                }
             } else {
                 Button(onClick = {
                     navigateToConnection()
