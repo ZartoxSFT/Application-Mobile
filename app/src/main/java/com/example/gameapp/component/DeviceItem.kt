@@ -10,6 +10,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 
 @SuppressLint("MissingPermission")
@@ -18,17 +19,19 @@ fun DeviceItem(
     device: BluetoothDevice,
     onClick: () -> Unit
 ) {
-    val name = device.name ?: "Unknown Device"
-    val address = device.address
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onClick() }
-            .padding(vertical = 8.dp, horizontal = 4.dp)
+            .clip(MaterialTheme.shapes.small)
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp, horizontal = 8.dp)
     ) {
-        Text(text = name, style = MaterialTheme.typography.bodyLarge)
         Text(
-            text = address,
+            text = device.name ?: "Unknown device",
+            style = MaterialTheme.typography.bodyLarge
+        )
+        Text(
+            text = device.address,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

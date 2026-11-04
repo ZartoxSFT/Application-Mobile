@@ -12,6 +12,7 @@ import com.example.gameapp.navigation.Routes
 import com.example.gameapp.ui.theme.GameAppTheme
 import com.example.gameapp.view.ConnectionScreen
 import com.example.gameapp.view.GameScreen
+import com.example.gameapp.view.HistoricScreen
 import com.example.gameapp.view.HomeScreen
 
 class MainActivity : ComponentActivity() {
@@ -26,33 +27,41 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
+                // Avoid pushing the same screen twice on a double tap
+                fun navigate(route: Routes) {
+                    if (backStack.lastOrNull() != route) backStack.add(route)
+                }
+
+                fun goBack() {
+                    if (backStack.size > 1) backStack.removeAt(backStack.lastIndex)
+                }
+
                 NavDisplay(
                     backStack = backStack,
-                    onBack = { backStack.removeLastOrNull() },
+                    onBack = { goBack() },
                     entryProvider = { key ->
                         when (key) {
                             Routes.HomeScreen -> NavEntry(key) {
                                 HomeScreen(
-                                    navigateToGame = { backStack.add(Routes.GameScreen) },
-                                    navigateToHistoric = { backStack.add(Routes.HistoricScreen(null)) },
-                                    navigateToConnection = { backStack.add(Routes.ConnectionScreen) }
+                                    navigateToGame = { navigate(Routes.GameScreen) },
+                                    navigateToHistoric = { navigate(Routes.HistoricScreen) },
+                                    navigateToConnection = { navigate(Routes.ConnectionScreen) }
                                 )
                             }
 
                             Routes.GameScreen -> NavEntry(key) {
-                                GameScreen()
+                                GameScreen(onBack = { goBack() })
                             }
 
                             Routes.ConnectionScreen -> NavEntry(key) {
                                 ConnectionScreen(
-                                    onLoginSuccess = {
-                                        backStack.removeLastOrNull()
-                                    }
+                                    onLoginSuccess = { goBack() },
+                                    onBack = { goBack() }
                                 )
                             }
 
-                            is Routes.HistoricScreen -> NavEntry(key) {
-                                GameScreen()
+                            Routes.HistoricScreen -> NavEntry(key) {
+                                HistoricScreen(onBack = { goBack() })
                             }
                         }
                     }
