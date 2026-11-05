@@ -77,6 +77,7 @@ fun GameScreen(
     val connectedDeviceName by gameVM.connectedDeviceName.collectAsState()
     val connectionStatus by gameVM.connectionStatus.collectAsState()
     val receivedMessage by gameVM.receivedMessage.collectAsState()
+    val liveScores by gameVM.liveScores.collectAsState()
     val messageText by gameVM.messageText.collectAsState()
     val isSaving by gameVM.isSaving.collectAsState()
     val showDevicePicker by gameVM.showDevicePicker.collectAsState()
@@ -186,6 +187,10 @@ fun GameScreen(
                     )
 
                     if (isConnected) {
+                        liveScores?.let { (scoreJ1, scoreJ2) ->
+                            ScoreCard(scoreJ1 = scoreJ1, scoreJ2 = scoreJ2)
+                        }
+
                         DirectionalCross(onDirectionClick = gameVM::sendDirection)
 
                         SectionCard(title = "Send a message") {
@@ -273,6 +278,27 @@ private fun InfoCard(emoji: String, text: String) {
                 style = MaterialTheme.typography.bodyLarge,
                 textAlign = TextAlign.Center
             )
+        }
+    }
+}
+
+@Composable
+private fun ScoreCard(scoreJ1: Int, scoreJ2: Int) {
+    SectionCard(title = "Score") {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            listOf("J1 (you)" to scoreJ1, "J2" to scoreJ2).forEach { (label, score) ->
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(text = score.toString(), style = MaterialTheme.typography.headlineMedium)
+                }
+            }
         }
     }
 }

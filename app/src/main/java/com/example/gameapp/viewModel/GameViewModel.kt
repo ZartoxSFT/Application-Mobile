@@ -63,6 +63,10 @@ class GameViewModel(
     private val _messageText = MutableStateFlow("Hello ESP32")
     val messageText: StateFlow<String> = _messageText.asStateFlow()
 
+    /** Live scores (player 1, player 2) sent by the ESP32 as "SCORE:<J1>,<J2>". */
+    private val _liveScores = MutableStateFlow<Pair<Int, Int>?>(null)
+    val liveScores: StateFlow<Pair<Int, Int>?> = _liveScores.asStateFlow()
+
     /** Short user-facing messages (displayed as toasts by the screen). */
     private val _userMessages = Channel<String>(Channel.BUFFERED)
     val userMessages = _userMessages.receiveAsFlow()
@@ -71,9 +75,21 @@ class GameViewModel(
         // Automatically listen to Bluetooth messages from ESP-32 Feather
         viewModelScope.launch {
             receivedMessage.collect { message ->
-                message?.let { parseAndSaveGameResultFromBluetooth(it) }
+                message?.let {
+                    if (!parseLiveScores(it)) parseAndSaveGameResultFromBluetooth(it)
+                }
             }
         }
+    }
+
+    private fun parseLiveScores(message: String): Boolean {
+        val trimmed = message.trim()
+        if (!trimmed.startsWith("SCORE:")) return false
+        val scores = trimmed.substringAfter("SCORE:").split(",").map { it.trim().toIntOrNull() }
+        if (scores.size == 2 && scores[0] != null && scores[1] != null) {
+            _liveScores.value = scores[0]!! to scores[1]!!
+        }
+        return true
     }
 
     // region Device picker

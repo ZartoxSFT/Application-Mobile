@@ -109,6 +109,7 @@ class BluetoothController(
         UUID.fromString("6E400003-B5A3-F393-E0A9-E50E24DCCA9E") // Pour recevoir depuis l'ESP32
     private val CCCD_UUID: UUID =
         UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+    private val REQUESTED_MTU = 247
 
     @SuppressLint("MissingPermission")
     fun startDiscovery(): Boolean {
@@ -151,11 +152,22 @@ class BluetoothController(
         @SuppressLint("MissingPermission")
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
-                _connectionStatus.value = "Connected. Discovering services..."
-                gatt.discoverServices()
+                // Default MTU only allows 20-byte notifications: too small for the
+                // end-of-game JSON sent by the ESP32. Services are discovered once done.
+                _connectionStatus.value = "Connected. Negotiating MTU..."
+                if (!gatt.requestMtu(REQUESTED_MTU)) {
+                    gatt.discoverServices()
+                }
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 closeConnection()
             }
+        }
+
+        @SuppressLint("MissingPermission")
+        override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) {
+            Log.d("BluetoothController", "MTU = $mtu (status $status)")
+            _connectionStatus.value = "Connected. Discovering services..."
+            gatt.discoverServices()
         }
 
         @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
@@ -238,14 +250,16 @@ class BluetoothController(
             return false
         }
 
+        // No-response writes: lower latency for the controller buttons
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val result = gatt.writeCharacteristic(
                 char,
                 message.toByteArray(),
-                BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
             )
             result == BluetoothStatusCodes.SUCCESS
         } else {
+            char.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
             @Suppress("DEPRECATION")
             char.value = message.toByteArray()
             @Suppress("DEPRECATION")
